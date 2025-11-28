@@ -9,7 +9,7 @@ This system is built with modern, scalable technologies:
 - **Backend**: Django REST Framework with Python
 - **Database**: Azure Cosmos DB (Serverless) for high-performance, globally distributed data storage
 - **Geospatial Processing**: ArcGIS API for Python + ArcGIS JavaScript API for US state-level geofencing
-
+- **Caching**: Redis with Django-Redis for high-performance caching
 - **Frontend**: HTML with Tailwind CSS, Alpine.js, and ArcGIS JavaScript API for real-time dashboard
 - **Monitoring**: Built-in health checks and comprehensive logging
 
@@ -39,6 +39,7 @@ This system is built with modern, scalable technologies:
 - **Django REST Framework**: API development
 - **Azure Cosmos DB (Serverless)**: NoSQL database for geospatial data
 - **ArcGIS API for Python 2.4.2**: State-level geofencing
+- **Redis**: Caching layer
 - **Structlog**: Structured logging
 
 ### Frontend
@@ -57,6 +58,17 @@ This system is built with modern, scalable technologies:
 - Redis server (optional, for caching)
 - Azure Cosmos DB account (Serverless)
 - Git
+
+## 🚀 Quick Start - Unzipping the Project
+### Step 1: 
+Open "geofence_event_processing_project" project in IDE
+
+### Step 2:
+Open README.md file for detail steps / follow below steps.
+
+### Step 3: 
+After creating virtual environment and installing dependencies, create database and container in Azure Cosmos DB, and fill the details in .env file.
+
 
 ## 🚀 Quick Start
 
@@ -83,19 +95,22 @@ pip install -r requirements.txt
 ```
 
 ### 4. Environment Configuration
-Create a `.env` file in root directory with your Azure Cosmos DB credentials:
+Create a `.env` file with your Azure Cosmos DB credentials:
 ```env
 # Azure Cosmos DB Configuration (Serverless)
 COSMOS_ENDPOINT=https://your-cosmos-account.documents.azure.com:443/
 COSMOS_KEY=your-cosmos-key
-COSMOS_DATABASE_NAME=your_database_name
-COSMOS_CONTAINER_NAME=your_container_name
+COSMOS_DATABASE_NAME=geofence-data
+COSMOS_CONTAINER_NAME=taxi
 
 # Django Configuration
 SECRET_KEY=your-secret-key
 DEBUG=True
 ALLOWED_HOSTS=localhost,127.0.0.1
 
+# Redis Configuration (optional)
+REDIS_URL=redis://127.0.0.1:6379/1
+```
 
 ### 5. Initialize Database
 ```bash
@@ -108,7 +123,7 @@ python manage.py runserver
 ```
 
 ### 7. Access the Dashboard
-- **Geofence Taxi Dashboard (ArcGIS)**: `http://localhost:8000/`
+- **US Taxi Dashboard**: `http://localhost:8000/`
 
 ## 📡 API Documentation
 
@@ -224,11 +239,57 @@ geofence_event_processing_project/
 3. **Auto-scaling**: Handles traffic spikes automatically
 4. **Global Distribution**: Low latency worldwide
 
-### Assumptions
-1. Taxis operate within the continental United States
-2. GPS coordinates are in WGS84 (EPSG:4326) format
-3. Network connectivity is available for ArcGIS API calls
-4. Cosmos DB container uses `vehicle_id` as partition key
+## ⚠️ Assumptions & Tradeoffs
+
+### Sample Data Assumptions
+
+This project uses **sample/demo data** for demonstration purposes:
+
+| Data Type | Sample Size | Notes |
+|-----------|-------------|-------|
+| **Taxis** | 5 vehicles | Taxi A through E with predefined routes |
+| **States** | 10 US states | Rhode Island, Massachusetts, Tennessee, Alabama, Idaho, Montana, New York, Connecticut, Texas, New Mexico |
+| **Routes** | 5 fixed routes | Each taxi has a single pickup → dropoff route that loops continuously |
+| **GPS Coordinates** | Hardcoded | Real city coordinates within each state (e.g., Providence RI, Boston MA) |
+
+### Technical Assumptions
+
+1. **Continental US Only**: Taxis operate within the continental United States; Alaska, Hawaii, and territories are not included
+2. **WGS84 Coordinates**: All GPS coordinates use WGS84 (EPSG:4326) format, the standard for GPS devices
+3. **Network Connectivity**: Requires internet access for ArcGIS API spatial queries
+4. **Cosmos DB Partition Key**: The `taxi` container uses `id` as the partition key
+5. **Single Instance**: Designed for single-server deployment; distributed deployment would require additional configuration
+
+### Design Tradeoffs
+
+| Decision | Tradeoff | Rationale |
+|----------|----------|-----------|
+| **5 Taxis (not 1000s)** | Limited scale demo | Keeps ArcGIS API calls manageable; demonstrates core functionality without rate limiting issues |
+| **Fixed Routes** | No dynamic routing | Simplifies simulation; real system would integrate with routing APIs |
+| **Polling (2s interval)** | Not real-time WebSocket | Simpler implementation; WebSocket would reduce latency but add complexity |
+| **ArcGIS Sample Server** | Dependent on external service | Free, reliable, no API key required; production would use dedicated ArcGIS service |
+| **In-Memory Simulation** | State lost on restart | Fast performance; production would persist simulation state to database |
+| **10x Speed Multiplier** | Unrealistic taxi speeds | Faster demo progression; real system would use actual travel times |
+
+### What Would Change in Production
+
+| Demo Implementation | Production Implementation |
+|---------------------|---------------------------|
+| 5 hardcoded taxis | Dynamic fleet from database |
+| Fixed pickup/dropoff points | Real-time dispatch system integration |
+| ArcGIS Sample Server | Licensed ArcGIS Enterprise or Azure Maps |
+| Polling every 2 seconds | WebSocket real-time updates |
+| SQLite for Django | PostgreSQL with PostGIS |
+| Single server | Kubernetes with auto-scaling |
+| No authentication | OAuth2/JWT authentication |
+
+### Known Limitations
+
+1. **ArcGIS Rate Limits**: The public ArcGIS Sample Server may throttle requests under heavy load
+2. **No Offline Support**: Requires continuous internet connectivity
+3. **No Route Optimization**: Taxis travel in straight lines, not actual road networks
+4. **Single Timezone**: All timestamps are in UTC; no timezone localization
+5. **No Historical Replay**: Cannot replay past taxi movements (only current state)
 
 ## 🔧 Configuration Files
 
@@ -293,4 +354,3 @@ Logs are stored in `logs/geofence.log` with levels:
 ## 📄 License
 
 This project is licensed under the MIT License.
-
