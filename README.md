@@ -108,8 +108,7 @@ python manage.py runserver
 ```
 
 ### 7. Access the Dashboard
-- **US Taxi Dashboard (ArcGIS)**: `http://localhost:8000/us-taxi/`
-- **Legacy Dashboard**: `http://localhost:8000/`
+- **Geofence Taxi Dashboard (ArcGIS)**: `http://localhost:8000/`
 
 ## 📡 API Documentation
 
@@ -294,3 +293,4 @@ Logs are stored in `logs/geofence.log` with levels:
 ## 📄 License
 
 This project is licensed under the MIT License.
+
