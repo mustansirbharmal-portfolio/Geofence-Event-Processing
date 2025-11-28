@@ -1,0 +1,68 @@
+# Core Django Framework
+Django==5.2.8
+djangorestframework==3.15.2
+django-cors-headers==4.5.0
+
+# Azure Cosmos DB
+azure-cosmos==4.7.0
+
+# H3 Geospatial Library (REMOVED - replaced with ArcGIS API)
+# h3==3.7.7
+
+# Environment Variables
+python-decouple==3.8
+
+# Caching
+redis==5.0.8
+django-redis==5.4.0
+
+# HTTP Client
+requests==2.32.3
+
+# JSON Handling
+orjson==3.10.7
+
+# Logging and Monitoring
+structlog==24.4.0
+
+# Development and Testing
+pytest==8.3.3
+pytest-django==4.9.0
+coverage==7.6.1
+
+# Production Server
+gunicorn==23.0.0
+
+# Time Zone Handling
+pytz==2024.2
+
+# Validation
+pydantic==2.9.2
+
+# Background Tasks (Optional for future scaling)
+celery==5.4.0
+
+# Health Checks
+django-health-check==3.18.3
+
+# System Monitoring
+psutil==6.0.0
+
+# Lightweight geospatial libraries (Python 3.13+ compatible)
+geopy==2.4.1
+folium==0.17.0
+
+# ArcGIS API for Python and dependencies
+arcgis==2.4.2
+truststore>=0.10.0
+geomet>=1.0.0
+keyring>=23.3.0
+matplotlib-inline
+puremagic>=1.15,<2
+pylerc
+dask[dataframe]>=2024.12.1,<2025.3
+
+# Optional ArcGIS visualization dependencies (can be skipped if not using notebooks)
+# anywidget==0.9.18
+# ipywidgets>=8.0.0
+# jupyterlab>=4.0.7,<4.4.0

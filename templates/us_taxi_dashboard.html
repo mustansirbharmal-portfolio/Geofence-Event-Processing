@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>US Multi-State Taxi Tracking Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <!-- ArcGIS JavaScript API -->
+    <link rel="stylesheet" href="https://js.arcgis.com/4.28/esri/themes/light/main.css">
+    <script src="https://js.arcgis.com/4.28/"></script>
+    <style>
+        .notification-enter {
+            animation: slideInRight 0.3s ease-out;
+        }
+        .notification-exit {
+            animation: slideOutRight 0.3s ease-in;
+        }
+        @keyframes slideInRight {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes slideOutRight {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
+        #map {
+            height: 500px;
+        }
+        .esri-view .esri-view-surface--inset-outline:focus::after {
+            outline: none !important;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div x-data="taxiDashboard()" x-init="init()" class="min-h-screen">
+        <!-- Header -->
+        <header class="bg-blue-600 text-white shadow-lg">
+            <div class="container mx-auto px-4 py-4">
+                <div class="flex justify-between items-center">
+                    <h1 class="text-2xl font-bold">🚖 US Multi-State Taxi Tracking</h1>
+                    <div class="flex items-center space-x-4">
+                        <div class="flex items-center space-x-2">
+                            <div class="w-3 h-3 rounded-full" :class="simulationRunning ? 'bg-green-400' : 'bg-red-400'"></div>
+                            <span x-text="simulationRunning ? 'Simulation Running' : 'Simulation Stopped'"></span>
+                        </div>
+                        <button 
+                            @click="toggleSimulation()"
+                            :disabled="loading"
+                            class="px-4 py-2 rounded-lg font-medium transition-colors"
+                            :class="simulationRunning ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'"
+                        >
+                            <span x-text="simulationRunning ? 'Stop Simulation' : 'Start Simulation'"></span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <div class="container mx-auto px-4 py-6">
+            <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                <!-- Map Section -->
+                <div class="lg:col-span-3">
+                    <div class="bg-white rounded-lg shadow-lg p-4">
+                        <h2 class="text-xl font-semibold mb-4">Real-time Taxi Locations (ArcGIS)</h2>
+                        <div id="map" class="w-full rounded-lg"></div>
+                        <div class="mt-2 text-sm text-gray-500">
+                            <span class="font-medium">Map Attribution:</span> Esri, HERE, Garmin, USGS, NGA, EPA, USDA, NPS
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sidebar -->
+                <div class="space-y-6">
+                    <!-- Taxi Status -->
+                    <div class="bg-white rounded-lg shadow-lg p-4">
+                        <h3 class="text-lg font-semibold mb-4">Taxi Status</h3>
+                        <div class="space-y-3">
+                            <template x-for="taxi in Object.values(taxis)" :key="taxi.taxi_id">
+                                <div class="p-3 border rounded-lg">
+                                    <div class="flex justify-between items-center mb-2">
+                                        <span class="font-medium" x-text="taxi.taxi_id.toUpperCase()"></span>
+                                        <span class="text-sm px-2 py-1 rounded-full"
+                                              :class="getStatusColor(taxi.status)"
+                                              x-text="taxi.status"></span>
+                                    </div>
+                                    <div class="text-sm text-gray-600">
+                                        <div x-text="'Zone: ' + (taxi.current_zone || 'Unknown')"></div>
+                                        <div x-text="'Progress: ' + Math.round(taxi.route_progress * 100) + '%'"></div>
+                                        <div x-show="taxi.current_route">
+                                            <span x-text="taxi.current_route?.pickup?.state"></span> → 
+                                            <span x-text="taxi.current_route?.dropoff?.state"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Zone Search -->
+                    <div class="bg-white rounded-lg shadow-lg p-4">
+                        <h3 class="text-lg font-semibold mb-4">Search Taxis by Zone</h3>
+                        <div class="space-y-3">
+                            <input 
+                                type="text" 
+                                x-model="searchZone"
+                                @keyup.enter="searchTaxisByZone()"
+                                placeholder="Enter state name..."
+                                class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                            <button 
+                                @click="searchTaxisByZone()"
+                                class="w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                            >
+                                Search
+                            </button>
+                            <div x-show="searchResults.length > 0" class="mt-3">
+                                <h4 class="font-medium mb-2">Found <span x-text="searchResults.length"></span> taxi(s):</h4>
+                                <template x-for="result in searchResults" :key="result.taxi_id">
+                                    <div class="text-sm p-2 bg-gray-50 rounded">
+                                        <span class="font-medium" x-text="result.taxi_id.toUpperCase()"></span>
+                                        in <span x-text="result.current_zone"></span>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Trace Details Section -->
+            <div class="mt-6">
+                <div class="bg-white rounded-lg shadow-lg p-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-semibold">📋 Trace Details <span class="text-sm font-normal text-gray-500">(Last 10 events from Azure Cosmos DB)</span></h3>
+                        <button 
+                            @click="fetchTraceEvents()"
+                            class="text-sm px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                        >
+                            Refresh
+                        </button>
+                    </div>
+                    <div class="max-h-64 overflow-y-auto">
+                        <div x-show="traceEvents.length === 0" class="text-gray-500 text-center py-4">
+                            No zone events yet. Start the simulation to see taxi zone entries and exits.
+                        </div>
+                        <div class="space-y-2">
+                            <template x-for="event in traceEvents.slice(0, 10)" :key="event.id">
+                                <div class="flex items-center p-2 rounded-lg text-sm"
+                                     :class="event.type === 'entry' ? 'bg-green-50 border-l-4 border-green-500' : 'bg-red-50 border-l-4 border-red-500'">
+                                    <span class="mr-2" x-text="event.type === 'entry' ? '🟢' : '🔴'"></span>
+                                    <span class="text-gray-500 mr-2 text-xs" x-text="formatTimestamp(event.timestamp)"></span>
+                                    <span class="font-medium" :style="'color:' + getTaxiColor(event.taxi_id.toLowerCase().replace('taxi_', 'taxi_'))" x-text="event.taxi_id"></span>
+                                    <span class="mx-1" x-text="event.type === 'entry' ? 'entered' : 'exited'"></span>
+                                    <span class="font-medium text-blue-600" x-text="event.zone"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Map Legend -->
+            <div class="mt-4">
+                <div class="bg-white rounded-lg shadow-lg p-4">
+                    <h3 class="text-lg font-semibold mb-3">🗺️ Map Legend</h3>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div class="flex items-center">
+                            <div class="w-4 h-4 rounded-full bg-red-500 mr-2 border-2 border-white shadow"></div>
+                            <span class="text-sm">Taxi A</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-4 h-4 rounded-full bg-green-500 mr-2 border-2 border-white shadow"></div>
+                            <span class="text-sm">Taxi B</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-4 h-4 rounded-full bg-blue-500 mr-2 border-2 border-white shadow"></div>
+                            <span class="text-sm">Taxi C</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-4 h-4 rounded-full bg-yellow-500 mr-2 border-2 border-white shadow"></div>
+                            <span class="text-sm">Taxi D</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-4 h-4 rounded-full bg-purple-500 mr-2 border-2 border-white shadow"></div>
+                            <span class="text-sm">Taxi E</span>
+                        </div>
+                        <div class="flex items-center">
+                            <span class="text-lg mr-2">📍</span>
+                            <span class="text-sm">Dropoff Location</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-4 h-4 bg-blue-200 border border-blue-400 mr-2"></div>
+                            <span class="text-sm">State Zone</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Zone Notifications -->
+        <div class="fixed top-20 right-4 space-y-2 z-50">
+            <template x-for="notification in notifications" :key="notification.id">
+                <div 
+                    class="bg-white border-l-4 p-4 rounded-lg shadow-lg max-w-sm notification-enter"
+                    :class="notification.type === 'entry' ? 'border-green-500' : 'border-red-500'"
+                    x-show="notification.visible"
+                    x-transition:leave="notification-exit"
+                >
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">
+                            <span x-text="notification.type === 'entry' ? '🟢' : '🔴'" class="text-lg"></span>
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-gray-900">
+                                <span x-text="notification.taxi_id.toUpperCase()"></span>
+                                <span x-text="notification.type === 'entry' ? 'ENTERED' : 'EXITED'"></span>
+                            </p>
+                            <p class="text-sm text-gray-600" x-text="notification.zone"></p>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <script>
+        // ArcGIS Map globals
+        let arcgisView = null;
+        let arcgisGraphicsLayer = null;
+        let arcgisStatesLayer = null;
+        let arcgisModules = {};
+
+        // Load ArcGIS modules
+        require([
+            "esri/Map",
+            "esri/views/MapView",
+            "esri/layers/GraphicsLayer",
+            "esri/layers/FeatureLayer",
+            "esri/Graphic",
+            "esri/symbols/PictureMarkerSymbol",
+            "esri/symbols/SimpleMarkerSymbol",
+            "esri/symbols/SimpleFillSymbol",
+            "esri/symbols/SimpleLineSymbol",
+            "esri/PopupTemplate",
+            "esri/geometry/Point"
+        ], function(Map, MapView, GraphicsLayer, FeatureLayer, Graphic, PictureMarkerSymbol, 
+                    SimpleMarkerSymbol, SimpleFillSymbol, SimpleLineSymbol, PopupTemplate, Point) {
+            
+            // Store modules for later use
+            arcgisModules = {
+                Map, MapView, GraphicsLayer, FeatureLayer, Graphic, PictureMarkerSymbol,
+                SimpleMarkerSymbol, SimpleFillSymbol, SimpleLineSymbol, PopupTemplate, Point
+            };
+
+            // Create the map
+            const map = new Map({
+                basemap: "streets-navigation-vector"
+            });
+
+            // Create the view
+            arcgisView = new MapView({
+                container: "map",
+                map: map,
+                center: [-98.5795, 39.8283], // Center of US
+                zoom: 4
+            });
+
+            // Add US States boundary layer from ArcGIS Sample Server (add first so it's below)
+            arcgisStatesLayer = new FeatureLayer({
+                url: "https://sampleserver6.arcgisonline.com/arcgis/rest/services/USA/MapServer/2",
+                outFields: ["state_name", "state_abbr"],
+                opacity: 0.3,
+                renderer: {
+                    type: "simple",
+                    symbol: {
+                        type: "simple-fill",
+                        color: [100, 149, 237, 0.2], // Cornflower blue with transparency
+                        outline: {
+                            color: [70, 130, 180, 0.8], // Steel blue
+                            width: 1.5
+                        }
+                    }
+                },
+                popupTemplate: {
+                    title: "{state_name}",
+                    content: "State: {state_abbr}"
+                }
+            });
+            map.add(arcgisStatesLayer);
+
+            // Create graphics layer for taxi markers (add last so it's on top)
+            arcgisGraphicsLayer = new GraphicsLayer({
+                title: "Taxi Locations"
+            });
+            map.add(arcgisGraphicsLayer);
+
+            // Signal that ArcGIS is ready
+            window.arcgisReady = true;
+            console.log("ArcGIS Map initialized successfully");
+        });
+
+        function taxiDashboard() {
+            return {
+                map: null,
+                taxis: {},
+                simulationRunning: false,
+                loading: false,
+                searchZone: '',
+                searchResults: [],
+                notifications: [],
+                notificationId: 0,
+                taxiGraphics: {},
+                traceEvents: [],
+                traceEventId: 0,
+
+                init() {
+                    this.waitForArcGIS();
+                    this.checkSimulationStatus();
+                    this.fetchTraceEvents();
+                    this.startPolling();
+                },
+
+                waitForArcGIS() {
+                    const checkReady = setInterval(() => {
+                        if (window.arcgisReady) {
+                            clearInterval(checkReady);
+                            console.log("ArcGIS ready, updating markers");
+                            this.updateMapMarkers();
+                        }
+                    }, 100);
+                },
+
+                async checkSimulationStatus() {
+                    try {
+                        const response = await fetch('/api/v2/simulation/status/');
+                        const data = await response.json();
+                        console.log("Simulation status:", data.simulation_running, "Taxis:", Object.keys(data.taxis || {}).length);
+                        this.simulationRunning = data.simulation_running;
+                        
+                        if (data.taxis) {
+                            this.taxis = data.taxis;
+                            if (window.arcgisReady) {
+                                this.updateMapMarkers();
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error checking simulation status:', error);
+                    }
+                },
+
+                async toggleSimulation() {
+                    this.loading = true;
+                    try {
+                        const endpoint = this.simulationRunning ? 'stop' : 'start';
+                        const response = await fetch(`/api/v2/simulation/${endpoint}/`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': this.getCsrfToken()
+                            }
+                        });
+                        
+                        if (response.ok) {
+                            this.simulationRunning = !this.simulationRunning;
+                            if (this.simulationRunning) {
+                                this.showNotification('system', 'Simulation Started', 'entry');
+                            } else {
+                                this.showNotification('system', 'Simulation Stopped', 'exit');
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error toggling simulation:', error);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async searchTaxisByZone() {
+                    if (!this.searchZone.trim()) return;
+                    
+                    try {
+                        const response = await fetch(`/api/v2/simulation/search/?zone=${encodeURIComponent(this.searchZone)}`);
+                        const data = await response.json();
+                        this.searchResults = data.taxis || [];
+                    } catch (error) {
+                        console.error('Error searching taxis:', error);
+                        this.searchResults = [];
+                    }
+                },
+
+                async fetchTraceEvents() {
+                    try {
+                        const response = await fetch('/api/v2/trace-events/?limit=10');
+                        const data = await response.json();
+                        
+                        if (data.trace_events) {
+                            this.traceEvents = data.trace_events;
+                            console.log("Fetched", this.traceEvents.length, "trace events from Cosmos DB");
+                        }
+                    } catch (error) {
+                        console.error('Error fetching trace events:', error);
+                    }
+                },
+
+                formatTimestamp(timestamp) {
+                    if (!timestamp) return '';
+                    try {
+                        const date = new Date(timestamp);
+                        return date.toLocaleTimeString('en-US', { 
+                            hour: '2-digit', 
+                            minute: '2-digit', 
+                            second: '2-digit'
+                        });
+                    } catch (e) {
+                        return timestamp;
+                    }
+                },
+
+                updateMapMarkers() {
+                    if (!arcgisGraphicsLayer || !arcgisModules.Graphic) {
+                        console.log("ArcGIS not ready yet");
+                        return;
+                    }
+
+                    // Clear existing graphics
+                    arcgisGraphicsLayer.removeAll();
+                    this.taxiGraphics = {};
+
+                    const { Graphic, SimpleMarkerSymbol, Point, PopupTemplate, PictureMarkerSymbol } = arcgisModules;
+                    
+                    console.log("Updating markers for", Object.keys(this.taxis).length, "taxis");
+
+                    // Add new markers for each taxi
+                    Object.values(this.taxis).forEach(taxi => {
+                        // Get dropoff coordinates (handle both formats)
+                        let dropoffLat, dropoffLng;
+                        if (taxi.current_route && taxi.current_route.dropoff) {
+                            if (taxi.current_route.dropoff.coordinates) {
+                                // Array format: [lat, lng]
+                                dropoffLat = taxi.current_route.dropoff.coordinates[0];
+                                dropoffLng = taxi.current_route.dropoff.coordinates[1];
+                            } else {
+                                // Object format: {lat, lng}
+                                dropoffLat = taxi.current_route.dropoff.lat;
+                                dropoffLng = taxi.current_route.dropoff.lng;
+                            }
+                        }
+
+                        // Add dropoff location marker first (so it appears behind taxi)
+                        if (dropoffLat && dropoffLng) {
+                            const dropoffPoint = new Point({
+                                longitude: dropoffLng,
+                                latitude: dropoffLat
+                            });
+
+                            // Create 📍 pin marker for dropoff - use simple marker with path style
+                            const dropoffSymbol = {
+                                type: "simple-marker",
+                                style: "path",
+                                path: "M16,0 C7.163,0 0,7.163 0,16 C0,28 16,40 16,40 S32,28 32,16 C32,7.163 24.837,0 16,0 Z",
+                                color: [220, 38, 38], // Red color
+                                size: "24px",
+                                outline: {
+                                    color: [255, 255, 255],
+                                    width: 2
+                                }
+                            };
+
+                            const dropoffPopup = new PopupTemplate({
+                                title: "📍 Dropoff: " + taxi.taxi_id.toUpperCase(),
+                                content: `
+                                    <div style="padding: 10px;">
+                                        <p><strong>Destination:</strong> ${taxi.current_route.dropoff.state}</p>
+                                        <p><strong>City:</strong> ${taxi.current_route.dropoff.city || 'N/A'}</p>
+                                    </div>
+                                `
+                            });
+
+                            const dropoffGraphic = new Graphic({
+                                geometry: dropoffPoint,
+                                symbol: dropoffSymbol,
+                                attributes: {
+                                    type: 'dropoff',
+                                    taxi_id: taxi.taxi_id,
+                                    state: taxi.current_route.dropoff.state
+                                },
+                                popupTemplate: dropoffPopup
+                            });
+
+                            arcgisGraphicsLayer.add(dropoffGraphic);
+
+                            // Add "D" label for dropoff
+                            const dropoffLabelSymbol = {
+                                type: "text",
+                                color: [220, 38, 38],
+                                haloColor: [255, 255, 255],
+                                haloSize: "2px",
+                                text: taxi.taxi_id.toUpperCase().replace('TAXI_', '') + " dest",
+                                xoffset: 0,
+                                yoffset: -25,
+                                font: {
+                                    size: 9,
+                                    weight: "bold"
+                                }
+                            };
+
+                            const dropoffLabelGraphic = new Graphic({
+                                geometry: dropoffPoint,
+                                symbol: dropoffLabelSymbol
+                            });
+                            arcgisGraphicsLayer.add(dropoffLabelGraphic);
+                        }
+
+                        // Add taxi current position marker
+                        if (taxi.current_position) {
+                            const point = new Point({
+                                longitude: taxi.current_position.longitude,
+                                latitude: taxi.current_position.latitude
+                            });
+
+                            // Create pin marker symbol with taxi color
+                            const color = this.getTaxiColorRGB(taxi.taxi_id);
+                            
+                            // Create a pin-style marker for taxi
+                            const markerSymbol = {
+                                type: "simple-marker",
+                                style: "circle",
+                                color: color,
+                                size: "18px",
+                                outline: {
+                                    color: [255, 255, 255],
+                                    width: 3
+                                }
+                            };
+
+                            // Create popup template
+                            const popupTemplate = new PopupTemplate({
+                                title: "🚖 " + taxi.taxi_id.toUpperCase(),
+                                content: `
+                                    <div style="padding: 10px;">
+                                        <p><strong>Zone:</strong> ${taxi.current_zone || 'Unknown'}</p>
+                                        <p><strong>Status:</strong> ${taxi.status}</p>
+                                        <p><strong>Progress:</strong> ${Math.round(taxi.route_progress * 100)}%</p>
+                                        ${taxi.current_route ? `
+                                            <p><strong>Route:</strong> ${taxi.current_route.pickup.state} → ${taxi.current_route.dropoff.state}</p>
+                                        ` : ''}
+                                    </div>
+                                `
+                            });
+
+                            const graphic = new Graphic({
+                                geometry: point,
+                                symbol: markerSymbol,
+                                attributes: {
+                                    taxi_id: taxi.taxi_id,
+                                    zone: taxi.current_zone,
+                                    status: taxi.status
+                                },
+                                popupTemplate: popupTemplate
+                            });
+
+                            arcgisGraphicsLayer.add(graphic);
+                            this.taxiGraphics[taxi.taxi_id] = graphic;
+
+                            // Add a label below the taxi marker
+                            const labelSymbol = {
+                                type: "text",
+                                color: [50, 50, 50],
+                                haloColor: [255, 255, 255],
+                                haloSize: "2px",
+                                text: taxi.taxi_id.toUpperCase().replace('TAXI_', ''),
+                                xoffset: 0,
+                                yoffset: -20,
+                                font: {
+                                    size: 10,
+                                    weight: "bold"
+                                }
+                            };
+
+                            const labelGraphic = new Graphic({
+                                geometry: point,
+                                symbol: labelSymbol
+                            });
+                            arcgisGraphicsLayer.add(labelGraphic);
+
+                            // Draw route line from taxi to dropoff
+                            if (dropoffLat && dropoffLng) {
+                                const routeLine = {
+                                    type: "polyline",
+                                    paths: [[
+                                        [taxi.current_position.longitude, taxi.current_position.latitude],
+                                        [dropoffLng, dropoffLat]
+                                    ]]
+                                };
+
+                                const lineSymbol = {
+                                    type: "simple-line",
+                                    color: [...color, 0.6],
+                                    width: 2,
+                                    style: "dash"
+                                };
+
+                                const routeGraphic = new Graphic({
+                                    geometry: routeLine,
+                                    symbol: lineSymbol
+                                });
+                                arcgisGraphicsLayer.add(routeGraphic);
+                            }
+                        }
+                    });
+                },
+
+                startPolling() {
+                    // Poll taxi data every 2 seconds
+                    setInterval(async () => {
+                        if (this.simulationRunning) {
+                            await this.updateTaxiData();
+                        }
+                    }, 2000);
+                    
+                    // Poll trace events every 5 seconds
+                    setInterval(async () => {
+                        if (this.simulationRunning) {
+                            await this.fetchTraceEvents();
+                        }
+                    }, 5000);
+                },
+
+                async updateTaxiData() {
+                    try {
+                        const response = await fetch('/api/v2/simulation/status/');
+                        const data = await response.json();
+                        
+                        if (data.taxis) {
+                            // Check for zone changes
+                            Object.values(data.taxis).forEach(newTaxi => {
+                                const oldTaxi = this.taxis[newTaxi.taxi_id];
+                                if (oldTaxi && oldTaxi.current_zone !== newTaxi.current_zone) {
+                                    if (oldTaxi.current_zone) {
+                                        this.showNotification(newTaxi.taxi_id, oldTaxi.current_zone, 'exit');
+                                    }
+                                    if (newTaxi.current_zone) {
+                                        this.showNotification(newTaxi.taxi_id, newTaxi.current_zone, 'entry');
+                                    }
+                                }
+                            });
+
+                            this.taxis = data.taxis;
+                            if (window.arcgisReady) {
+                                this.updateMapMarkers();
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error updating taxi data:', error);
+                    }
+                },
+
+                showNotification(taxiId, zone, type) {
+                    const notification = {
+                        id: ++this.notificationId,
+                        taxi_id: taxiId,
+                        zone: zone,
+                        type: type,
+                        visible: true
+                    };
+
+                    this.notifications.push(notification);
+
+                    // Add to trace events (skip system notifications)
+                    if (taxiId !== 'system') {
+                        const now = new Date();
+                        const timestamp = now.toLocaleTimeString('en-US', { 
+                            hour: '2-digit', 
+                            minute: '2-digit', 
+                            second: '2-digit' 
+                        });
+                        
+                        this.traceEvents.push({
+                            id: ++this.traceEventId,
+                            taxi_id: taxiId,
+                            zone: zone,
+                            type: type,
+                            timestamp: timestamp
+                        });
+
+                        // Keep only last 50 events
+                        if (this.traceEvents.length > 50) {
+                            this.traceEvents = this.traceEvents.slice(-50);
+                        }
+                    }
+
+                    // Auto-remove notification after 5 seconds
+                    setTimeout(() => {
+                        notification.visible = false;
+                        setTimeout(() => {
+                            const index = this.notifications.findIndex(n => n.id === notification.id);
+                            if (index > -1) {
+                                this.notifications.splice(index, 1);
+                            }
+                        }, 300); // Wait for exit animation
+                    }, 5000);
+                },
+
+                getTaxiColor(taxiId) {
+                    const colors = {
+                        'taxi_a': '#EF4444', // Red
+                        'taxi_b': '#10B981', // Green
+                        'taxi_c': '#3B82F6', // Blue
+                        'taxi_d': '#F59E0B', // Yellow
+                        'taxi_e': '#8B5CF6'  // Purple
+                    };
+                    return colors[taxiId] || '#6B7280';
+                },
+
+                getTaxiColorRGB(taxiId) {
+                    const colors = {
+                        'taxi_a': [239, 68, 68],   // Red
+                        'taxi_b': [16, 185, 129],  // Green
+                        'taxi_c': [59, 130, 246],  // Blue
+                        'taxi_d': [245, 158, 11],  // Yellow/Orange
+                        'taxi_e': [139, 92, 246]   // Purple
+                    };
+                    return colors[taxiId] || [107, 114, 128];
+                },
+
+                getStatusColor(status) {
+                    const colors = {
+                        'idle': 'bg-gray-200 text-gray-800',
+                        'pickup': 'bg-blue-200 text-blue-800',
+                        'enroute': 'bg-green-200 text-green-800',
+                        'dropoff': 'bg-yellow-200 text-yellow-800'
+                    };
+                    return colors[status] || 'bg-gray-200 text-gray-800';
+                },
+
+                getCsrfToken() {
+                    const cookies = document.cookie.split(';');
+                    for (let cookie of cookies) {
+                        const [name, value] = cookie.trim().split('=');
+                        if (name === 'csrftoken') {
+                            return value;
+                        }
+                    }
+                    return '';
+                }
+            }
+        }
+    </script>
+</body>
+</html>
