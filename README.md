@@ -9,7 +9,7 @@ This system is built with modern, scalable technologies:
 - **Backend**: Django REST Framework with Python
 - **Database**: Azure Cosmos DB (Serverless) for high-performance, globally distributed data storage
 - **Geospatial Processing**: ArcGIS API for Python + ArcGIS JavaScript API for US state-level geofencing
-- **Caching**: Redis with Django-Redis for high-performance caching
+
 - **Frontend**: HTML with Tailwind CSS, Alpine.js, and ArcGIS JavaScript API for real-time dashboard
 - **Monitoring**: Built-in health checks and comprehensive logging
 
@@ -39,7 +39,6 @@ This system is built with modern, scalable technologies:
 - **Django REST Framework**: API development
 - **Azure Cosmos DB (Serverless)**: NoSQL database for geospatial data
 - **ArcGIS API for Python 2.4.2**: State-level geofencing
-- **Redis**: Caching layer
 - **Structlog**: Structured logging
 
 ### Frontend
@@ -84,22 +83,19 @@ pip install -r requirements.txt
 ```
 
 ### 4. Environment Configuration
-Create a `.env` file with your Azure Cosmos DB credentials:
+Create a `.env` file in root directory with your Azure Cosmos DB credentials:
 ```env
 # Azure Cosmos DB Configuration (Serverless)
 COSMOS_ENDPOINT=https://your-cosmos-account.documents.azure.com:443/
 COSMOS_KEY=your-cosmos-key
-COSMOS_DATABASE_NAME=geofence-data
-COSMOS_CONTAINER_NAME=taxi
+COSMOS_DATABASE_NAME=your_database_name
+COSMOS_CONTAINER_NAME=your_container_name
 
 # Django Configuration
 SECRET_KEY=your-secret-key
 DEBUG=True
 ALLOWED_HOSTS=localhost,127.0.0.1
 
-# Redis Configuration (optional)
-REDIS_URL=redis://127.0.0.1:6379/1
-```
 
 ### 5. Initialize Database
 ```bash
